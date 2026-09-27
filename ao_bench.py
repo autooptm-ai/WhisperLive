@@ -114,9 +114,12 @@ class Session:
         t0 = time.perf_counter()
         for i in range(0, len(audio), CHUNK):
             self.ws.send(audio[i:i + CHUNK].tobytes(), opcode=websocket.ABNF.OPCODE_BINARY)
-        self.ws.send(b"END_OF_AUDIO", opcode=websocket.ABNF.OPCODE_BINARY)
         # Done when the transcript reaches the end of the clip, or when the
         # server has gone quiet for 3 s after saying anything at all.
+        # END_OF_AUDIO goes out only AFTER that, as whisper_live.client does
+        # (wait_before_disconnect() first): the server tears the session down
+        # on END_OF_AUDIO without transcribing what is still buffered, so sent
+        # straight after the unpaced packets it closed every session (code 1000).
         while time.perf_counter() - t0 < timeout:
             if self.error:
                 raise RuntimeError(self.error)
@@ -128,6 +131,7 @@ class Session:
         dt = time.perf_counter() - t0
         text = " ".join(s["text"].strip() for _, s in sorted(self.segments.items()))
         try:
+            self.ws.send(b"END_OF_AUDIO", opcode=websocket.ABNF.OPCODE_BINARY)
             self.ws.close()
         except Exception:                                         # noqa: BLE001
             pass
